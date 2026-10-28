@@ -56,6 +56,8 @@
 
 ### 2. 前置条件
 
+本分支支持 Milky（Lagrange V2）：使用入站 `image.data.sub_type: "sticker"` 判断表情包，以出站 `image` 消息段的 `sub_type: "sticker"` 发送。原始 GIF 字节默认保留，普通照片不会仅因尺寸相近被自动收藏。Milky 与 OneBot 共用现有的图库、收集概率、冷却、审核池和检索配置。
+
 **必须配置视觉模型**。插件依赖 VLM 对图片进行分类，可以使用 AstrBot 全局图片描述模型，也可以在插件配置中指定 `vision_provider_id`。Embedding 检索为可选项，启用后需配置可用的 Embedding Provider。
 
 ### 3. 开始使用

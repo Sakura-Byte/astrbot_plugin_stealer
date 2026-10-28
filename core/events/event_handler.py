@@ -423,7 +423,10 @@ class EventHandler:
             )
             raw_message = None
             if isinstance(raw_event, dict):
-                raw_message = raw_event.get("message")
+                if raw_event.get("event_type") == "message_receive":
+                    raw_message = (raw_event.get("data") or {}).get("segments")
+                else:
+                    raw_message = raw_event.get("message")
             elif raw_event is not None:
                 raw_message = getattr(raw_event, "message", None)
             logger.debug(

@@ -38,6 +38,7 @@ help: |
   WebUI：在插件详情页点击「表情管理」进入管理面板；「外部源」可导入 Meme Pack、GitHub 资源包仓库或同步 HTTPS JSON 目录，也能在导入整套角色表情时批量分配角色。
 version: 3.1.11
 support_platforms:
+  - milky
   - aiocqhttp
   - telegram
   - qq_official

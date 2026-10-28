@@ -1,11 +1,16 @@
 """平台相关的表情包投递优化。"""
 
+import asyncio
+import base64
 import os
+from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image
+
+from .event_context import get_event_platform_name
 
 
 async def send_qq_image_as_sticker(
@@ -14,9 +19,58 @@ async def send_qq_image_as_sticker(
     summary: str = "[动画表情]",
     plugin: Any = None,
 ) -> bool:
-    """在 QQ (aiocqhttp) 平台以自定义表情类型发送图片。"""
+    """Send a QQ custom sticker through Milky or OneBot.
+
+    Args:
+        event: Destination message event.
+        file_path: Existing local image file.
+        summary: QQ preview text.
+        plugin: Plugin instance providing delivery settings.
+
+    Returns:
+        Whether sticker delivery succeeded; false allows normal image fallback.
+    """
     if not getattr(plugin, "send_meme_as_qq_sticker", True):
         return False
+    if get_event_platform_name(event) == "milky":
+        if not file_path or not Path(file_path).is_file():
+            return False
+        try:
+            # Preserve original GIF bytes and use Milky's native sticker subtype.
+            encoded = None
+            if plugin and getattr(plugin, "send_meme_as_gif", False):
+                renderer = getattr(plugin, "image_render_service", None)
+                if renderer:
+                    encoded = await renderer.file_to_gif_base64(file_path)
+            if not encoded:
+                encoded = base64.b64encode(
+                    await asyncio.to_thread(Path(file_path).read_bytes)
+                ).decode("ascii")
+            group_id = event.get_group_id()
+            peer_id = int(group_id or event.get_sender_id())
+            await event.bot.call_action(
+                "send_group_message" if group_id else "send_private_message",
+                **{
+                    "group_id" if group_id else "user_id": peer_id,
+                    "message": [
+                        {
+                            "type": "image",
+                            "data": {
+                                "uri": f"base64://{encoded}",
+                                "sub_type": "sticker",
+                                "summary": summary,
+                            },
+                        }
+                    ],
+                },
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "[Stealer] Milky sticker delivery failed (%s); falling back to image",
+                type(exc).__name__,
+            )
+            return False
     try:
         from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
             AiocqhttpMessageEvent,

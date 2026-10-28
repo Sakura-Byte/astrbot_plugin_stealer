@@ -22,6 +22,7 @@ def qq_delivery(monkeypatch, tmp_path):
     monkeypatch.setattr(emoji_delivery, "Image", lambda **kwargs: kwargs)
     monkeypatch.setattr(emoji_delivery, "MessageChain", list)
     event = QQEvent()
+    event.get_platform_name = lambda: "aiocqhttp"
     event._parse_onebot_json = AsyncMock(
         return_value=[{"type": "image", "data": {"file": "base64://image"}}]
     )
@@ -90,7 +91,10 @@ async def test_send_failure_logs_and_allows_fallback(qq_delivery, monkeypatch):
 @pytest.mark.asyncio
 async def test_non_qq_platform_keeps_existing_delivery(qq_delivery):
     _, path = qq_delivery
-    event = types.SimpleNamespace(bot=types.SimpleNamespace(send=AsyncMock()))
+    event = types.SimpleNamespace(
+        bot=types.SimpleNamespace(send=AsyncMock()),
+        get_platform_name=lambda: "telegram",
+    )
 
     assert not await emoji_delivery.send_qq_image_as_sticker(event, path)
     event.bot.send.assert_not_awaited()

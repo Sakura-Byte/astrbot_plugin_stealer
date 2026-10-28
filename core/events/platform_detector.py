@@ -113,7 +113,7 @@ class PlatformDetector:
             def is_sub_type_emoji(sub_type: object) -> bool:
                 if sub_type is None:
                     return False
-                if sub_type == 1 or sub_type == "1":
+                if sub_type in (1, "1", "sticker"):
                     return True
                 try:
                     return int(sub_type) == 1
@@ -154,7 +154,10 @@ class PlatformDetector:
                 logger.debug(f"[EmojiCheck] 方式0: raw_event type={type(raw_event).__name__}, is_dict={isinstance(raw_event, dict)}")
                 # raw_event 可能是 dict（aiocqhttp）或对象，需要兼容两种类型
                 if isinstance(raw_event, dict):
-                    raw_message = raw_event.get("message")
+                    if raw_event.get("event_type") == "message_receive":
+                        raw_message = (raw_event.get("data") or {}).get("segments")
+                    else:
+                        raw_message = raw_event.get("message")
                 elif raw_event is not None:
                     raw_message = getattr(raw_event, "message", None)
                 logger.debug(f"[EmojiCheck] 方式0: raw_message type={type(raw_message).__name__ if raw_message else 'None'}")
