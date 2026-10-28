@@ -142,7 +142,9 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             event.get_extra("stealer_auto_emoji_turn_reason"), "chance_zero"
         )
 
-    async def test_prepare_emoji_response_leaves_text_unchanged_when_probability_misses(self):
+    async def test_prepare_emoji_response_leaves_text_unchanged_when_probability_misses(
+        self,
+    ):
         main = _build_main(0.0)
         event = DummyEvent("hello")
 
@@ -196,7 +198,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         main.categories = ["happy"]
         main.db_service = types.SimpleNamespace(
             count_total=lambda: 1,
-            get_index_cache_readonly=lambda: {__file__: {"source": "local"}}
+            get_index_cache_readonly=lambda: {__file__: {"source": "local"}},
         )
 
         async def _search_candidates(_event, _query, limit, idx):
@@ -212,7 +214,9 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(results)
         self.assertNotIn("Auto emoji is disabled for this turn.", results)
-        self.assertIsNotNone(main._emoji_sender_engine.emoji_turn_state(event).get_candidates())
+        self.assertIsNotNone(
+            main._emoji_sender_engine.emoji_turn_state(event).get_candidates()
+        )
         result_text = "\n".join(results)
         self.assertIn("send_meme(emoji_id=", result_text)
         self.assertNotIn("send_emoji_by_id", result_text)
@@ -248,7 +252,9 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         main._safe_create_task = _safe_create_task
         handled = await main._prepare_emoji_response(event)
 
-        self.assertTrue(main._emoji_sender_engine.emoji_turn_state(event).is_active_sent())
+        self.assertTrue(
+            main._emoji_sender_engine.emoji_turn_state(event).is_active_sent()
+        )
         self.assertEqual(recorded, [("meme.png", "generic_tool")])
         self.assertFalse(handled)
         self.assertEqual(scheduled, [])
@@ -264,9 +270,13 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         event = DummyEvent()
         tool = types.SimpleNamespace(name="send_message_to_user")
         args = {"messages": [{"type": "image", "path": "meme.png"}]}
-        failed = types.SimpleNamespace(content=[types.SimpleNamespace(text="send failed")])
+        failed = types.SimpleNamespace(
+            content=[types.SimpleNamespace(text="send failed")]
+        )
         success = types.SimpleNamespace(
-            content=[types.SimpleNamespace(text="Message sent to session other-session")]
+            content=[
+                types.SimpleNamespace(text="Message sent to session other-session")
+            ]
         )
 
         await main._track_external_image_delivery(event, tool, args, failed)
@@ -443,8 +453,8 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         finally:
             Path(local_path).unlink(missing_ok=True)
 
-    async def test_steal_tool_keeps_relative_path_when_no_image_in_message(self):
-        """消息内无 Image 组件时，ref 原样回传给下游以提供准确错误提示。"""
+    async def test_steal_tool_rejects_reference_when_no_image_in_message(self):
+        """Reject invented references before downloading or reading files."""
         main = _build_main(1.0)
 
         class EmptyEvent(DummyEvent):
@@ -455,11 +465,31 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             def _extract_store_emoji_urls(self, _event):
                 return []
 
-        resolved, source = await main._resolve_steal_image_ref(
-            EmptyEvent(), "./orphan.png", FakeEventHandler()
+        for reference in [
+            "./orphan.png",
+            "https://gchat.qpic.cn/invented/0",
+            "file:///tmp/invented.png",
+        ]:
+            resolved, source = await main._resolve_steal_image_ref(
+                EmptyEvent(), reference, FakeEventHandler()
+            )
+            self.assertEqual(resolved, "")
+            self.assertEqual(source, "llm_tool")
+
+    async def test_steal_tool_does_not_replace_invented_ref_with_another_image(self):
+        main = _build_main(1.0)
+        image = sys.modules[Main.__module__].MessageImage()
+        image.url = "https://example.test/actual.png"
+
+        class ImageEvent(DummyEvent):
+            def get_messages(self):
+                return [image]
+
+        handler = types.SimpleNamespace(_extract_store_emoji_urls=lambda event: [])
+        resolved, _ = await main._resolve_steal_image_ref(
+            ImageEvent(), "https://example.test/invented.png", handler
         )
-        self.assertEqual(resolved, "./orphan.png")
-        self.assertEqual(source, "llm_tool")
+        self.assertEqual(resolved, "")
 
     async def test_steal_tool_passes_origin_metadata_to_processor(self):
         main = _build_main(1.0)
@@ -488,7 +518,9 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         async def _save_index(idx):
             saved.append(idx)
 
-        async def _process_image(event, file_path, is_temp=False, extra_meta=None, **kwargs):
+        async def _process_image(
+            event, file_path, is_temp=False, extra_meta=None, **kwargs
+        ):
             captured["extra_meta"] = dict(extra_meta or {})
             return True, {
                 file_path: {
@@ -507,14 +539,22 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
         try:
             results = []
-            async for chunk in main.steal_sticker(DummyEvent(), "https://example.test/a.png"):
+            image = sys.modules[Main.__module__].MessageImage()
+            image.url = "https://example.test/a.png"
+            event = DummyEvent()
+            event.get_messages = lambda: [image]
+            async for chunk in main.steal_sticker(event, "https://example.test/a.png"):
                 results.append(chunk)
         finally:
             Path(temp_path).unlink(missing_ok=True)
 
-        self.assertTrue(any("偷取成功" in item for item in results), f"results={results}")
+        self.assertTrue(
+            any("偷取成功" in item for item in results), f"results={results}"
+        )
         self.assertEqual(captured["extra_meta"]["origin_target"], "group:123")
-        self.assertEqual(captured["extra_meta"]["origin_url"], "https://example.test/a.png")
+        self.assertEqual(
+            captured["extra_meta"]["origin_url"], "https://example.test/a.png"
+        )
         self.assertEqual(captured["extra_meta"]["source"], "llm_tool")
         self.assertTrue(saved)
 

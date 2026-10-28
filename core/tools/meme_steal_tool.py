@@ -13,6 +13,7 @@ from ..events.event_context import unwrap_event
 from ..util.normalization import canonicalize_path
 from ..util.safe_io import safe_remove_file
 
+
 class MemeStealToolWorkflow:
     async def _steal_sticker_impl(
         self,
@@ -43,7 +44,9 @@ class MemeStealToolWorkflow:
                 yield "偷取失败：当前群聊已禁用偷取功能"
                 return
 
-            event_handler = self._get_event_handler(log_message="event_handler 未初始化，无法下载图片")
+            event_handler = self._get_event_handler(
+                log_message="event_handler 未初始化，无法下载图片"
+            )
             if event_handler is None:
                 yield "偷取失败：内部服务未初始化"
                 return
@@ -52,21 +55,27 @@ class MemeStealToolWorkflow:
                 event, image_ref, event_handler
             )
             if not image_ref:
-                yield "偷取失败：缺少 image_ref 参数，请提供当前消息中的图片 URL"
+                yield "偷取失败：image_ref 未匹配当前消息中的真实图片，请重新发送图片；不要编造图片地址"
                 return
 
             logger.info(f"[Tool] LLM 请求偷取: ref={image_ref[:80]}")
 
             # 下载图片
             if image_ref.startswith("http://") or image_ref.startswith("https://"):
-                temp_path, _is_gif = await event_handler._download_to_temp(image_ref, log_download=True)
+                temp_path, _is_gif = await event_handler._download_to_temp(
+                    image_ref, log_download=True
+                )
                 if not temp_path or not os.path.exists(temp_path):
                     yield f"偷取失败：无法下载图片 {image_ref[:100]}"
                     return
                 is_temp = True
             elif image_ref.startswith("file:///"):
                 local_path = image_ref[8:]
-                if len(local_path) > 2 and local_path[0] == "/" and local_path[2] == ":":
+                if (
+                    len(local_path) > 2
+                    and local_path[0] == "/"
+                    and local_path[2] == ":"
+                ):
                     local_path = local_path[1:]
                 temp_path = os.path.abspath(local_path)
                 is_temp = False
@@ -121,14 +130,29 @@ class MemeStealToolWorkflow:
                 await self.index_manager.save_index(merged_idx)
                 new_paths = set(merged_idx.keys()) - before_paths
                 if new_paths:
-                    new_entry = next((merged_idx[p] for p in new_paths if isinstance(merged_idx.get(p), dict)), None)
+                    new_entry = next(
+                        (
+                            merged_idx[p]
+                            for p in new_paths
+                            if isinstance(merged_idx.get(p), dict)
+                        ),
+                        None,
+                    )
                     if new_entry and isinstance(new_entry, dict):
                         cat = new_entry.get("category", "?")
                         tag_list = new_entry.get("tags", [])
-                        tags_str = ", ".join(tag_list) if isinstance(tag_list, list) else str(tag_list)
+                        tags_str = (
+                            ", ".join(tag_list)
+                            if isinstance(tag_list, list)
+                            else str(tag_list)
+                        )
                         desc_text = new_entry.get("desc", "")
                         scene_list = new_entry.get("scenes", [])
-                        scenes_str = ", ".join(scene_list) if isinstance(scene_list, list) else str(scene_list)
+                        scenes_str = (
+                            ", ".join(scene_list)
+                            if isinstance(scene_list, list)
+                            else str(scene_list)
+                        )
                         yield (
                             f"偷取成功！VLM 分析结果：\n"
                             f"- 分类：{cat}\n"
@@ -152,22 +176,10 @@ class MemeStealToolWorkflow:
         image_ref: str,
         event_handler: Any,
     ) -> tuple[str, str]:
-        """解析显式图片引用或当前消息中的可用图片，返回图片地址及来源类型。
-
-        URL 引用直接返回；路径或文件名优先匹配当前消息中的图片组件，
-        未匹配时从当前消息的可用图片及商城表情地址中查找。
-        """
+        """Resolve a real image from the current message, rejecting invented references."""
         explicit_ref = str(image_ref or "").strip()
 
-        # 1. URL 形式（http/https/file 协议）直接信任 LLM 传入
-        if explicit_ref and (
-            explicit_ref.startswith("http://")
-            or explicit_ref.startswith("https://")
-            or explicit_ref.startswith("file:")
-        ):
-            return explicit_ref, "llm_tool"
-
-        # 2. 尝试把显式 ref 解析为消息内某张图片的真实位置
+        # Explicit references must resolve to an image actually attached to this event.
         resolved_explicit = ""
         if explicit_ref:
             resolved_explicit = await self._resolve_image_ref_against_event(
@@ -175,6 +187,10 @@ class MemeStealToolWorkflow:
             )
             if resolved_explicit:
                 return resolved_explicit, "llm_tool"
+            store_urls = event_handler._extract_store_emoji_urls(event)
+            if explicit_ref in store_urls:
+                return explicit_ref, "qq_store"
+            return "", "llm_tool"
 
         # 3. 未提供 ref 或 ref 解析失败：取当前消息中第一张可用图片
         try:
@@ -201,8 +217,7 @@ class MemeStealToolWorkflow:
         if store_urls:
             return str(store_urls[0] or "").strip(), "qq_store"
 
-        # 5. 都没有的话才把显式 ref 原样回传（让下游报错时提示更准确）
-        return explicit_ref, "llm_tool"
+        return "", "llm_tool"
 
     async def _resolve_image_ref_against_event(
         self,
@@ -227,13 +242,20 @@ class MemeStealToolWorkflow:
             if not isinstance(comp, MessageImage):
                 continue
 
+            for attr in ("url", "file", "path"):
+                value = str(getattr(comp, attr, "") or "").strip()
+                if value and value.replace("\\", "/") == ref_norm:
+                    return value
+
             # a. basename 命中组件的 url/file/path
             if ref_basename:
                 for attr in ("url", "file", "path"):
                     value = str(getattr(comp, attr, "") or "").strip()
                     if not value:
                         continue
-                    value_norm = value.replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
+                    value_norm = (
+                        value.replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
+                    )
                     value_basename = value_norm.rsplit("/", 1)[-1]
                     if value_basename and value_basename == ref_basename:
                         return value
@@ -242,7 +264,9 @@ class MemeStealToolWorkflow:
             if os.path.isabs(image_ref):
                 for attr in ("file", "path"):
                     value = str(getattr(comp, attr, "") or "").strip()
-                    if value and canonicalize_path(value) == canonicalize_path(image_ref):
+                    if value and canonicalize_path(value) == canonicalize_path(
+                        image_ref
+                    ):
                         return value
 
             # c. 调用组件自身方法把图片落到本地，返回真实可读路径
@@ -258,9 +282,9 @@ class MemeStealToolWorkflow:
                 path_basename = path_norm.rsplit("/", 1)[-1].split("?")[0]
                 if ref_basename and path_basename == ref_basename:
                     return path
-                if os.path.isabs(image_ref) and canonicalize_path(path) == canonicalize_path(
-                    image_ref
-                ):
+                if os.path.isabs(image_ref) and canonicalize_path(
+                    path
+                ) == canonicalize_path(image_ref):
                     return path
 
         return ""

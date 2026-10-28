@@ -14,6 +14,7 @@ METADATA = REPO_ROOT / "metadata.yaml"
 
 # AstrBot 文档列出的合法平台适配器 key（ADAPTER_NAME_2_TYPE）
 ADAPTER_NAME_2_TYPE_KEYS = {
+    "milky",
     "aiocqhttp",
     "qq_official",
     "qq_official_webhook",
